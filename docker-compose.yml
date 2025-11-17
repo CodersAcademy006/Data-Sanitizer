@@ -1,0 +1,158 @@
+version: '3.9'
+
+services:
+  # PostgreSQL for metadata, audit logs, row hashes
+  postgres:
+    image: postgres:15-alpine
+    container_name: data-sanitizer-postgres
+    environment:
+      POSTGRES_DB: data_sanitizer
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Milvus for LSH samples and vector search
+  milvus:
+    image: milvusdb/milvus:latest
+    container_name: data-sanitizer-milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    environment:
+      COMMON_STORAGETYPE: local
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: data-sanitizer-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI REST API Server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: data-sanitizer-api
+    ports:
+      - "8000:8000"
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DATABASE: data_sanitizer
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      MILVUS_HOST: milvus
+      MILVUS_PORT: 19530
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data_cleaning.py:/app/data_cleaning.py
+      - ./storage_backend.py:/app/storage_backend.py
+      - ./cloud_storage.py:/app/cloud_storage.py
+      - ./api_server.py:/app/api_server.py
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Pass 1 Worker (Sampling & Index Building)
+  worker-pass1:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker-pass1
+    container_name: data-sanitizer-worker-pass1
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DATABASE: data_sanitizer
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      MILVUS_HOST: milvus
+      MILVUS_PORT: 19530
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data_cleaning.py:/app/data_cleaning.py
+      - ./storage_backend.py:/app/storage_backend.py
+      - ./cloud_storage.py:/app/cloud_storage.py
+      - ./worker_pass1.py:/app/worker_pass1.py
+      - ./input_data:/app/input_data
+      - ./output_data:/app/output_data
+
+  # Pass 2 Worker (Cleaning & Deduplication)
+  worker-pass2:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker-pass2
+    container_name: data-sanitizer-worker-pass2
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DATABASE: data_sanitizer
+      PG_USER: postgres
+      PG_PASSWORD: postgres
+      MILVUS_HOST: milvus
+      MILVUS_PORT: 19530
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./data_cleaning.py:/app/data_cleaning.py
+      - ./storage_backend.py:/app/storage_backend.py
+      - ./cloud_storage.py:/app/cloud_storage.py
+      - ./worker_pass2.py:/app/worker_pass2.py
+      - ./input_data:/app/input_data
+      - ./output_data:/app/output_data
+
+volumes:
+  postgres_data:
+  milvus_data:
+  redis_data:
+
+networks:
+  default:
+    name: data-sanitizer-network

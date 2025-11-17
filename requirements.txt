@@ -1,0 +1,68 @@
+# Core data processing
+pandas>=1.5.0
+numpy>=1.23.0
+polars>=0.18.0  # Faster alternative to pandas for large files
+
+# File format support
+openpyxl>=3.8.0  # Excel
+ijson>=3.2.0  # Streaming JSON
+pyarrow>=10.0.0  # Parquet + efficient operations
+
+# Cloud storage
+boto3>=1.26.0  # AWS S3
+google-cloud-storage>=2.7.0  # Google Cloud Storage
+
+# Production storage backends
+psycopg2-binary>=2.9.0  # PostgreSQL
+pymilvus>=2.2.0  # Milvus vector database
+redis>=4.3.0  # Redis caching
+
+# REST API & Web
+fastapi>=0.95.0
+uvicorn[standard]>=0.21.0
+pydantic>=1.10.0
+
+# Async & concurrency
+aiofiles>=23.0.0
+httpx>=0.24.0
+
+# Job orchestration
+celery>=5.2.0  # Task queue
+kombu>=5.2.0  # Message broker support
+rq>=1.13.0  # Simple job queue (alternative to Celery)
+
+# Observability
+prometheus-client>=0.15.0  # Prometheus metrics
+opentelemetry-api>=1.16.0  # OpenTelemetry
+opentelemetry-sdk>=1.16.0
+opentelemetry-exporter-prometheus>=0.37b0
+opentelemetry-instrumentation-fastapi>=0.37b0
+opentelemetry-instrumentation-psycopg2>=0.37b0
+
+# Logging
+python-json-logger>=2.0.0
+
+# Environment & config
+python-dotenv>=0.21.0
+pyyaml>=6.0
+
+# Testing
+pytest>=7.2.0
+pytest-asyncio>=0.20.0
+pytest-cov>=4.0.0
+hypothesis>=6.68.0  # Property-based testing
+
+# Code quality
+black>=23.0.0
+flake8>=5.0.0
+mypy>=0.990
+isort>=5.11.0
+
+# Documentation
+mkdocs>=1.4.0
+mkdocs-material>=8.5.0
+
+# Utilities
+click>=8.1.0  # CLI
+tqdm>=4.64.0  # Progress bars
+python-dateutil>=2.8.0
