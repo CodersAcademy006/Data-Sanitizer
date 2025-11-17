@@ -55,7 +55,7 @@ Data Sanitizer is a **production-ready data cleaning platform** designed for:
 ### 1. Clone & Install
 
 ```bash
-git clone https://github.com/your-org/data-sanitizer.git
+git clone https://github.com/CodersAcademy006/Data-Sanitizer.git
 cd data-sanitizer
 
 # Create virtual environment
@@ -450,7 +450,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 3. **Explore**: [docs/30DAY_ROADMAP.md](docs/30DAY_ROADMAP.md) (plan for next month)
 4. **Deploy**: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (production setup)
 
-**Questions?** Open an issue or contact us at `support@datasanitizer.io`
+**Questions?** Open an issue or contact us at `srjnupadhyay@gmail.com`
 
 ---
 
