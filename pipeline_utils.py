@@ -119,11 +119,12 @@ def enhance_numeric_inference(report_path_or_obj, input_path=None):
     This function writes an updated diagnostics file next to the report.
     """
     # Load report
+    report = None
     if isinstance(report_path_or_obj, str) and os.path.exists(report_path_or_obj):
         with open(report_path_or_obj, "r", encoding="utf-8") as f:
-            json.load(f)
+            report = json.load(f)
     elif isinstance(report_path_or_obj, dict):
-        pass
+        report = report_path_or_obj
     else:
         raise ValueError("report_path_or_obj must be a path or dict")
 
