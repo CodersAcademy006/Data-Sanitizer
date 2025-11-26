@@ -11,10 +11,11 @@ Output:
   - cleaned file at ./output/cleaned_{original_basename}.csv
   - Pass1/Pass2 stats printed to stdout and saved as JSON alongside output
 """
+
 import argparse
+import json
 import os
 import sys
-import json
 import tempfile
 from pathlib import Path
 
@@ -28,18 +29,18 @@ from worker_pass2 import Pass2Worker
 
 
 def convert_excel_to_csv(input_path: str, csv_out: str):
-    df = pd.read_excel(input_path, engine='xlrd' if input_path.lower().endswith('.xls') else None)
+    df = pd.read_excel(input_path, engine="xlrd" if input_path.lower().endswith(".xls") else None)
     df.to_csv(csv_out, index=False)
     return csv_out
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Run sample file through Data Sanitizer pipeline')
-    parser.add_argument('--input', '-i', required=True, help='Path to input file (.csv, .jsonl, .parquet, .xls, .xlsx)')
-    parser.add_argument('--chunksize', type=int, default=5000)
-    parser.add_argument('--sample-size', type=int, default=2000)
-    parser.add_argument('--output-dir', default='output')
-    parser.add_argument('--job-id', default=None)
+    parser = argparse.ArgumentParser(description="Run sample file through Data Sanitizer pipeline")
+    parser.add_argument("--input", "-i", required=True, help="Path to input file (.csv, .jsonl, .parquet, .xls, .xlsx)")
+    parser.add_argument("--chunksize", type=int, default=5000)
+    parser.add_argument("--sample-size", type=int, default=2000)
+    parser.add_argument("--output-dir", default="output")
+    parser.add_argument("--job-id", default=None)
     args = parser.parse_args()
 
     input_path = os.path.abspath(args.input)
@@ -55,12 +56,12 @@ def main():
 
     # If file is Excel (.xls or .xlsx) or has double extension like .csv.xls, convert
     lower = input_path.lower()
-    needs_convert = lower.endswith('.xls') or lower.endswith('.xlsx') or lower.endswith('.csv.xls')
+    needs_convert = lower.endswith(".xls") or lower.endswith(".xlsx") or lower.endswith(".csv.xls")
 
     to_process = input_path
     temp_csv = None
     if needs_convert:
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.csv')
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".csv")
         tmp.close()
         temp_csv = tmp.name
         print(f"Converting Excel to CSV: {input_path} -> {temp_csv}")
@@ -81,10 +82,10 @@ def main():
 
     # Save imputation stats if present into a small file for Pass2 to optionally use
     imputation_file = None
-    if p1_stats.get('imputation_stats'):
+    if p1_stats.get("imputation_stats"):
         imputation_file = os.path.join(args.output_dir, f"imputation_{base}.json")
-        with open(imputation_file, 'w') as f:
-            json.dump(p1_stats['imputation_stats'], f, default=str)
+        with open(imputation_file, "w") as f:
+            json.dump(p1_stats["imputation_stats"], f, default=str)
         print(f"Saved imputation stats to {imputation_file}")
 
     # Run Pass 2
@@ -93,14 +94,16 @@ def main():
     # If Pass2 supports reading imputation stats via schema_config, pass them
     schema_config = {}
     if imputation_file:
-        schema_config = p1_stats.get('imputation_stats', {})
+        schema_config = p1_stats.get("imputation_stats", {})
 
-    p2_stats = p2.process_file(input_path=to_process, output_path=cleaned_path, chunksize=args.chunksize, schema_config=schema_config)
+    p2_stats = p2.process_file(
+        input_path=to_process, output_path=cleaned_path, chunksize=args.chunksize, schema_config=schema_config
+    )
     print("Pass 2 stats:\n", json.dumps(p2_stats, indent=2, default=str))
 
     # Save combined stats
-    combined = {'pass1': p1_stats, 'pass2': p2_stats}
-    with open(stats_path, 'w') as f:
+    combined = {"pass1": p1_stats, "pass2": p2_stats}
+    with open(stats_path, "w") as f:
         json.dump(combined, f, indent=2, default=str)
     print(f"Saved combined stats to {stats_path}")
 
@@ -108,9 +111,10 @@ def main():
     if temp_csv and os.path.exists(temp_csv):
         os.remove(temp_csv)
 
-    print('\nPipeline complete.')
-    print(f'Cleaned file: {cleaned_path}')
-    print(f'Stats file: {stats_path}')
+    print("\nPipeline complete.")
+    print(f"Cleaned file: {cleaned_path}")
+    print(f"Stats file: {stats_path}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

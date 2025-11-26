@@ -2,26 +2,27 @@
 # SECTION 1: SETUP (IMPORTS & INSTALLS)
 # ----------------------------------------------------------------------------
 
+import hashlib
+import heapq
+import itertools
+import json
+import logging
+
 # Install necessary libraries for streaming Excel and JSON
 import os
 import sqlite3
-import hashlib
-import itertools
-import pandas as pd
-import numpy as np
-import io
-import warnings
-import json
-import re
-import logging
-import math
-import heapq
 import struct
-from collections import defaultdict, Counter
-from difflib import get_close_matches, SequenceMatcher # <-- BUG FIX: Imported SequenceMatcher
+import warnings
+from collections import Counter, defaultdict
+from difflib import SequenceMatcher, get_close_matches  # <-- BUG FIX: Imported SequenceMatcher
+
+import numpy as np
+import pandas as pd
+
 # Attempt to import Colab file uploader; fall back gracefully if not available.
 try:
     from google.colab import files  # type: ignore[import]  # <-- FEATURE: Added for file upload
+
     _HAS_COLAB = True
 except Exception:
     files = None
@@ -31,24 +32,27 @@ except Exception:
 # Optional: ijson can be finicky.
 try:
     import ijson  # type: ignore[import]
+
     _HAS_IJSON = True
 except Exception:
     _HAS_IJSON = False
 
 try:
     from openpyxl import load_workbook  # type: ignore[import]
+
     _HAS_OPENPYXL = True
 except Exception:
     _HAS_OPENPYXL = False
 
 
 # Setup basic logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------------
 # SECTION 2: CORE ALGORITHM - INGESTION (safe_read_v3)
 # ----------------------------------------------------------------------------
+
 
 def flatten_json(obj, parent_key="", sep="."):
     """
@@ -77,6 +81,7 @@ def flatten_json(obj, parent_key="", sep="."):
         items[parent_key] = obj
     return items
 
+
 def discover_json_array_schema(path, max_keys=100_000):
     """
     Stream the JSON array and collect the union of flattened keys across objects.
@@ -93,20 +98,23 @@ def discover_json_array_schema(path, max_keys=100_000):
                 for k in flat.keys():
                     keys.add(k)
                     if len(keys) >= max_keys:
-                        warnings.warn(f"Reached max_keys={max_keys} while discovering JSON schema. Consider increasing limit.")
+                        warnings.warn(
+                            f"Reached max_keys={max_keys} while discovering JSON schema. Consider increasing limit."
+                        )
                         return list(sorted(keys))
     except ijson.common.IncompleteJSONError:
-         # This can happen if the file is not a JSON array.
-         # Let's try to read it as a single object.
-         try:
+        # This can happen if the file is not a JSON array.
+        # Let's try to read it as a single object.
+        try:
             with open(path, "rb") as f:
                 obj = json.load(f)
                 flat = flatten_json(obj)
                 keys.update(flat.keys())
-         except Exception as e:
+        except Exception as e:
             logger.error(f"Failed to read JSON file {path} as either array or object. Error: {e}")
-            return [] # Return empty schema
+            return []  # Return empty schema
     return list(sorted(keys))
+
 
 def discover_jsonl_schema(path, max_keys=100_000):
     """
@@ -122,14 +130,17 @@ def discover_jsonl_schema(path, max_keys=100_000):
             try:
                 obj = json.loads(line)
             except Exception as e:
-                raise ValueError(f"Invalid JSON on line {i+1}: {e}")
+                raise ValueError(f"Invalid JSON on line {i + 1}: {e}")
             flat = flatten_json(obj)
             for k in flat.keys():
                 keys.add(k)
                 if len(keys) >= max_keys:
-                    warnings.warn(f"Reached max_keys={max_keys} while discovering JSONL schema. Consider increasing limit.")
+                    warnings.warn(
+                        f"Reached max_keys={max_keys} while discovering JSONL schema. Consider increasing limit."
+                    )
                     return list(sorted(keys))
     return list(sorted(keys))
+
 
 def jsonl_generator_with_schema(path, schema_keys, chunksize=50000):
     """
@@ -147,7 +158,7 @@ def jsonl_generator_with_schema(path, schema_keys, chunksize=50000):
             except Exception:
                 # Handle case where a line might not be valid JSON
                 continue
-                
+
             flat = flatten_json(obj)
             # build dict aligned to schema_keys (fast comprehension)
             buffer.append({k: flat.get(k, None) for k in schema_keys})
@@ -156,6 +167,7 @@ def jsonl_generator_with_schema(path, schema_keys, chunksize=50000):
                 buffer = []
     if buffer:
         yield pd.DataFrame(buffer)
+
 
 def safe_read_v3(path_or_buffer, chunksize=50000, json_schema_max_keys=100_000):
     """
@@ -185,7 +197,7 @@ def safe_read_v3(path_or_buffer, chunksize=50000, json_schema_max_keys=100_000):
         logger.info(f"Discovering JSON array schema (streaming): {path}")
         schema_keys = discover_json_array_schema(path, max_keys=json_schema_max_keys)
         logger.info(f"Discovered {len(schema_keys)} keys in JSON array schema. Starting stream.")
-        
+
         def gen_chunks():
             cols = schema_keys
             buffer = []
@@ -202,17 +214,17 @@ def safe_read_v3(path_or_buffer, chunksize=50000, json_schema_max_keys=100_000):
             except ijson.common.IncompleteJSONError:
                 # Fallback for single large JSON object (not in an array)
                 if not buffer:
-                     try:
+                    try:
                         with open(path, "rb") as f:
                             obj = json.load(f)
                             flat = flatten_json(obj)
                             yield pd.DataFrame([{k: flat.get(k, None) for k in cols}])
-                     except Exception:
+                    except Exception:
                         logger.error(f"Failed to parse {path} as single JSON object.")
-                        
+
             except Exception as e:
                 logger.error(f"Failed during JSON array streaming: {e}")
-                
+
         return gen_chunks()
 
     if lower.endswith(".xlsx"):
@@ -220,18 +232,18 @@ def safe_read_v3(path_or_buffer, chunksize=50000, json_schema_max_keys=100_000):
             raise RuntimeError("openpyxl is required for streaming Excel files. Install: pip install openpyxl")
         logger.info(f"Streaming Excel file (per-sheet): {path}")
         wb = load_workbook(filename=path, read_only=True, data_only=True)
-    
+
     elif lower.endswith(".xls"):
         # Use xlrd for legacy .xls format, but first check if it's actually CSV
         try:
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 first_line = f.readline()
-                if ',' in first_line:
+                if "," in first_line:
                     logger.info(f"Detected CSV content in .xls file; treating as CSV: {path}")
                     return pd.read_csv(path, chunksize=chunksize, low_memory=False)
         except Exception:
             pass
-        
+
         # Try to open as binary Excel file
         try:
             import xlrd  # type: ignore
@@ -244,7 +256,7 @@ def safe_read_v3(path_or_buffer, chunksize=50000, json_schema_max_keys=100_000):
         except Exception as e:
             logger.warning(f"Failed to open as xlrd binary format: {e}. Trying as CSV fallback.")
             return pd.read_csv(path, chunksize=chunksize, low_memory=False)
-        
+
         def gen_sheets_chunks_xls():
             for sheetname in workbook.sheet_names():
                 logger.info(f"Streaming sheet: {sheetname}")
@@ -252,7 +264,9 @@ def safe_read_v3(path_or_buffer, chunksize=50000, json_schema_max_keys=100_000):
                 buffer = []
                 if sheet.nrows < 1:
                     continue
-                header = [str(cell.value) if cell.value is not None else f"col_{i}" for i, cell in enumerate(sheet.row(0))]
+                header = [
+                    str(cell.value) if cell.value is not None else f"col_{i}" for i, cell in enumerate(sheet.row(0))
+                ]
                 for row_idx in range(1, sheet.nrows):
                     row_values = [cell.value for cell in sheet.row(row_idx)]
                     rowd = {header[j]: row_values[j] if j < len(row_values) else None for j in range(len(header))}
@@ -262,16 +276,16 @@ def safe_read_v3(path_or_buffer, chunksize=50000, json_schema_max_keys=100_000):
                         buffer = []
                 if buffer:
                     yield pd.DataFrame(buffer)
-        
+
         return gen_sheets_chunks_xls()
-    
+
     else:
         # If we reach here and have xlsx/xls, use openpyxl
         if not _HAS_OPENPYXL:
             raise RuntimeError("openpyxl is required for streaming Excel files. Install: pip install openpyxl")
         logger.info(f"Streaming Excel file (per-sheet): {path}")
         wb = load_workbook(filename=path, read_only=True, data_only=True)
-        
+
         def gen_sheets_chunks():
             for sheetname in wb.sheetnames:
                 logger.info(f"Streaming sheet: {sheetname}")
@@ -280,8 +294,8 @@ def safe_read_v3(path_or_buffer, chunksize=50000, json_schema_max_keys=100_000):
                 try:
                     header = next(rows_iter)
                 except StopIteration:
-                    continue # Empty sheet
-                cols = [str(h) if h is not None else f"col_{i}" for i,h in enumerate(header)]
+                    continue  # Empty sheet
+                cols = [str(h) if h is not None else f"col_{i}" for i, h in enumerate(header)]
                 buffer = []
                 for i, row in enumerate(rows_iter):
                     rowd = {cols[j]: row[j] if j < len(row) else None for j in range(len(cols))}
@@ -291,6 +305,7 @@ def safe_read_v3(path_or_buffer, chunksize=50000, json_schema_max_keys=100_000):
                         buffer = []
                 if buffer:
                     yield pd.DataFrame(buffer)
+
         return gen_sheets_chunks()
 
     # fallback to csv with explicit error
@@ -300,26 +315,29 @@ def safe_read_v3(path_or_buffer, chunksize=50000, json_schema_max_keys=100_000):
     except Exception as e:
         raise ValueError(f"Unsupported or unreadable file type: {path}. Error: {e}")
 
+
 # ----------------------------------------------------------------------------
 # SECTION 3: CORE ALGORITHM - STATISTICAL HELPERS
 # ----------------------------------------------------------------------------
+
 
 class DeterministicReservoir:
     """
     Keeps a deterministic, bounded sample of (key, value) pairs.
     Uses a hash(key_seed, row_id) as a deterministic priority. Keeps the smallest priorities.
     """
+
     def __init__(self, capacity=100000, salt="reservoir_v1"):
         self.capacity = int(capacity)
         self.salt = str(salt)
         self._heap = []  # max-heap by storing (-priority, row_id, value)
-        
+
     def _priority(self, row_id):
         # deterministic 64-bit integer derived from row_id + salt
-        h = hashlib.sha256(f"{self.salt}|{row_id}".encode('utf-8')).digest()
+        h = hashlib.sha256(f"{self.salt}|{row_id}".encode("utf-8")).digest()
         # take first 8 bytes as unsigned int
         return struct.unpack(">Q", h[:8])[0]
-        
+
     def add(self, row_id, value):
         p = self._priority(row_id)
         if len(self._heap) < self.capacity:
@@ -328,17 +346,19 @@ class DeterministicReservoir:
             # check largest (heap root) which stores -p
             if p < -self._heap[0][0]:
                 heapq.heapreplace(self._heap, (-p, row_id, value))
-                
+
     def get_values(self):
         return [item[2] for item in self._heap]
-        
+
     def get_priorities(self):
         return [(-item[0], item[1]) for item in self._heap]
+
 
 def _shingles(text, k=5):
     """Generates a set of k-shingles from a text string."""
     text = str(text).lower()
-    return set(text[i:i+k] for i in range(len(text) - k + 1))
+    return set(text[i : i + k] for i in range(len(text) - k + 1))
+
 
 def compute_minhash_signature(shingles, num_hashes=64):
     """
@@ -349,21 +369,22 @@ def compute_minhash_signature(shingles, num_hashes=64):
     # Use different salts (seeds) for each hash function
     seeds = range(num_hashes)
     for seed in seeds:
-        min_hash = float('inf')
+        min_hash = float("inf")
         for shingle in shingles:
             # Simple hash: hash(shingle + seed)
-            h = hashlib.sha256(f"{shingle}|{seed}".encode('utf-8')).digest()
+            h = hashlib.sha256(f"{shingle}|{seed}".encode("utf-8")).digest()
             val = struct.unpack(">Q", h[:8])[0]
             if val < min_hash:
                 min_hash = val
-        
+
         # *** BUG FIX ***
         # Handle empty shingles by appending 0 instead of inf
-        if min_hash == float('inf'):
+        if min_hash == float("inf"):
             signature.append(0)
         else:
             signature.append(min_hash)
     return signature
+
 
 def lsh_buckets_from_signature(signature, bands=16):
     """
@@ -373,20 +394,22 @@ def lsh_buckets_from_signature(signature, bands=16):
         return []
     rows = len(signature) // bands
     if rows == 0:
-        return [hashlib.md5(str(signature).encode('utf-8')).hexdigest()]
+        return [hashlib.md5(str(signature).encode("utf-8")).hexdigest()]
 
     buckets = []
     for i in range(bands):
-        band = signature[i*rows:(i+1)*rows]
+        band = signature[i * rows : (i + 1) * rows]
         # Hash the band to a single bucket
-        band_str = str(band).encode('utf-8')
+        band_str = str(band).encode("utf-8")
         bucket_hash = hashlib.md5(band_str).hexdigest()
         buckets.append(bucket_hash)
     return buckets
 
+
 # ----------------------------------------------------------------------------
 # SECTION 4: CORE ALGORITHM - CLEANING HELPERS
 # ----------------------------------------------------------------------------
+
 
 def _chunk_row_hashes_vectorized(df, exclude_suffix="_was_imputed"):
     """
@@ -401,11 +424,12 @@ def _chunk_row_hashes_vectorized(df, exclude_suffix="_was_imputed"):
         rows_concat = df.astype(str).agg("|".join, axis=1)
     else:
         rows_concat = df[cols].astype(str).agg("|".join, axis=1)
-        
+
     # compute md5 for series
-    hashes = rows_concat.apply(lambda s: hashlib.md5(s.encode('utf-8', errors='ignore')).hexdigest())
+    hashes = rows_concat.apply(lambda s: hashlib.md5(s.encode("utf-8", errors="ignore")).hexdigest())
     # return list of tuples (hash, original_row_index)
     return list(zip(hashes.tolist(), df.index.tolist()))
+
 
 def detect_outliers(df):
     """
@@ -420,7 +444,7 @@ def detect_outliers(df):
             Q3 = df[col].quantile(0.75)
             IQR = Q3 - Q1
             if pd.isna(IQR) or IQR == 0:
-                continue # Skip if no variance
+                continue  # Skip if no variance
             lower = Q1 - 1.5 * IQR
             upper = Q3 + 1.5 * IQR
             mask = (df[col] < lower) | (df[col] > upper)
@@ -428,52 +452,55 @@ def detect_outliers(df):
                 df[f"{col}_is_outlier"] = mask
                 report["outliers"][col] = int(mask.sum())
         except Exception:
-            pass # Ignore errors on columns with no variance, etc.
+            pass  # Ignore errors on columns with no variance, etc.
     return df, report
+
 
 def clean_columns(df):
     """Simple column cleaning: strips whitespace from object columns."""
     report = {}
-    for col in df.select_dtypes(include=['object']).columns:
+    for col in df.select_dtypes(include=["object"]).columns:
         if col.endswith("_was_imputed"):
             continue
         try:
             # Check if it's already string, if not, convert
             if not all(isinstance(x, str) for x in df[col].dropna()):
-                 df[col] = df[col].astype(str)
-                 
+                df[col] = df[col].astype(str)
+
             df[col] = df[col].str.strip()
             report[col] = "stripped"
         except Exception:
             pass
     return df, report
 
+
 def text_normalization(df, keep_punctuation=True):
     """Simple text normalization: lowercase and optional punctuation removal."""
     report = {}
-    for col in df.select_dtypes(include=['object']).columns:
+    for col in df.select_dtypes(include=["object"]).columns:
         if col.endswith("_was_imputed"):
             continue
         try:
             # Check if it's already string, if not, convert
             if not all(isinstance(x, str) for x in df[col].dropna()):
-                 df[col] = df[col].astype(str)
-                 
+                df[col] = df[col].astype(str)
+
             df[col] = df[col].str.lower()
             if not keep_punctuation:
-                df[col] = df[col].str.replace(r'[^\w\s]', '', regex=True)
+                df[col] = df[col].str.replace(r"[^\w\s]", "", regex=True)
             report[col] = "normalized"
         except Exception:
             pass
     return df, report
+
 
 def build_category_alias_map(series, similarity_threshold=0.86, max_categories=500):
     """
     Builds a map to merge similar-looking categories using difflib.
     """
     if series.nunique() > max_categories:
-        return {} # Too many unique values, skip
-        
+        return {}  # Too many unique values, skip
+
     unique_vals = [str(x) for x in series.dropna().unique()]
     alias_map = {}
     done = set()
@@ -489,9 +516,11 @@ def build_category_alias_map(series, similarity_threshold=0.86, max_categories=5
             done.add(m)
     return alias_map
 
+
 # ----------------------------------------------------------------------------
 # SECTION 5: CORE ALGORITHM - DATABASE HELPERS
 # ----------------------------------------------------------------------------
+
 
 def create_sqlite_conn(path=":memory:", pragmas=None):
     """Creates a fast, WAL-enabled SQLite connection."""
@@ -499,44 +528,51 @@ def create_sqlite_conn(path=":memory:", pragmas=None):
     cur = conn.cursor()
     # recommended pragmas for speed (safe in local context)
     default_pragmas = {
-        "journal_mode":"WAL",
-        "synchronous":"NORMAL",
-        "temp_store":"MEMORY",
-        "locking_mode":"EXCLUSIVE"
+        "journal_mode": "WAL",
+        "synchronous": "NORMAL",
+        "temp_store": "MEMORY",
+        "locking_mode": "EXCLUSIVE",
     }
     if pragmas is None:
         pragmas = default_pragmas
-    for k,v in pragmas.items():
+    for k, v in pragmas.items():
         try:
             cur.execute(f"PRAGMA {k}={v};")
         except Exception:
             pass
     return conn
 
+
 def init_sqlite_dbs(conn):
     """Initializes the tables for deduplication and LSH samples."""
     cur = conn.cursor()
     # exact dedupe table (primary key on hash ensures uniqueness)
-    cur.execute("""
+    cur.execute(
+        """
     CREATE TABLE IF NOT EXISTS row_hashes (
       hash TEXT PRIMARY KEY,
       first_seen_row INTEGER
     );
-    """)
+    """
+    )
     # LSH buckets table: bucket -> row_id -> snippet
-    cur.execute("""
+    cur.execute(
+        """
     CREATE TABLE IF NOT EXISTS lsh_samples (
       bucket_key TEXT,
       sampled_row_id INTEGER,
       snippet TEXT,
       PRIMARY KEY (bucket_key, sampled_row_id)
     );
-    """)
+    """
+    )
     conn.commit()
+
 
 # ----------------------------------------------------------------------------
 # SECTION 6: CORE ALGORITHM - THE TWO PASSES
 # ----------------------------------------------------------------------------
+
 
 def compute_global_stats_reservoir_schema_aware(
     path,
@@ -548,7 +584,7 @@ def compute_global_stats_reservoir_schema_aware(
     original_sample_mod=10,
     numeric_capacity=100000,
     max_original_sample_rows=1000,
-    numeric_vote_threshold=0.5  # if >50% sampled values looked numeric -> treat as numeric
+    numeric_vote_threshold=0.5,  # if >50% sampled values looked numeric -> treat as numeric
 ):
     """
     Deterministic first pass that:
@@ -559,7 +595,7 @@ def compute_global_stats_reservoir_schema_aware(
     """
     logger.info("Starting schema-aware first pass (reservoirs + sqlite)")
     reader = safe_read_v3(path, chunksize=chunksize)
-    
+
     # We must read the first chunk to establish an initial column list
     try:
         first_chunk = next(iter(reader))
@@ -572,8 +608,8 @@ def compute_global_stats_reservoir_schema_aware(
         cols = []
     except Exception as e:
         logger.error(f"Could not read first chunk from {path}: {e}")
-        return {} # Cannot proceed
-        
+        return {}  # Cannot proceed
+
     reservoirs = {}  # col -> DeterministicReservoir
     numeric_votes = defaultdict(int)  # col -> how many sampled rows looked numeric
     sampled_votes = defaultdict(int)  # col -> how many rows were considered in sampling
@@ -589,7 +625,9 @@ def compute_global_stats_reservoir_schema_aware(
     def _bulk_insert_lsh(rows_to_insert):
         if not rows_to_insert:
             return
-        cur.executemany("INSERT OR IGNORE INTO lsh_samples(bucket_key, sampled_row_id, snippet) VALUES (?, ?, ?);", rows_to_insert)
+        cur.executemany(
+            "INSERT OR IGNORE INTO lsh_samples(bucket_key, sampled_row_id, snippet) VALUES (?, ?, ?);", rows_to_insert
+        )
         conn.commit()
 
     def _is_numeric_like(val):
@@ -601,22 +639,22 @@ def compute_global_stats_reservoir_schema_aware(
         if isinstance(val, (int, float, np.number)):
             return True
         s = str(val).strip()
-        
+
         # *** BUG FIX ***
         # Handle common non-numeric strings explicitly
-        if s == "" or s.lower() == 'nan' or s.lower() == 'none':
+        if s == "" or s.lower() == "nan" or s.lower() == "none":
             return False
-            
+
         try:
             float(s)
             return True
         except Exception:
             return False
-    
+
     # Process all chunks
     for chunk in reader:
         rows_to_insert = []
-        
+
         # Ensure new columns from schema drift are added to our global list
         new_cols = [c for c in chunk.columns if c not in cols]
         if new_cols:
@@ -635,36 +673,38 @@ def compute_global_stats_reservoir_schema_aware(
                         try:
                             reservoirs[c].add(row_id, float(v))
                         except (ValueError, TypeError):
-                            pass # Failed to cast, not numeric
-                        
+                            pass  # Failed to cast, not numeric
+
             # categorical periodic sampling
             if (row_id % categorical_sample_mod) == 0:
                 for c in cols:
                     v = row.get(c)
                     if pd.notna(v):
                         categorical_counts[c][str(v).strip().lower()] += 1
-                        
+
             # LSH periodic sampling
             if (row_id % lsh_sample_mod) == 0:
                 # Use first 3 columns as-is for snippet
-                snippet = " ".join([str(row.get(c,"")) for c in cols[:3]])
+                snippet = " ".join([str(row.get(c, "")) for c in cols[:3]])
                 shingles = _shingles(snippet, k=SHINGLE_K)
                 sig = compute_minhash_signature(shingles, num_hashes=MINHASH_NUM)
                 bks = lsh_buckets_from_signature(sig, bands=LSH_BANDS)
                 for b in bks:
                     rows_to_insert.append((str(b), int(row_id), snippet))
-                    
+
             # original sample
             if len(original_samples) < max_original_sample_rows and (row_id % original_sample_mod) == 0:
                 original_samples.append(row.to_dict())
-                
+
             row_id += 1
-            
+
         _bulk_insert_lsh(rows_to_insert)
 
     # Decide numeric columns by vote threshold
-    numeric_cols_final = [c for c, s in sampled_votes.items() if s > 0 and (numeric_votes[c] / float(s)) >= numeric_vote_threshold]
-    
+    numeric_cols_final = [
+        c for c, s in sampled_votes.items() if s > 0 and (numeric_votes[c] / float(s)) >= numeric_vote_threshold
+    ]
+
     # Compute medians from reservoirs
     medians = {}
     for c in numeric_cols_final:
@@ -674,8 +714,8 @@ def compute_global_stats_reservoir_schema_aware(
             if vals:
                 medians[c] = float(np.median(vals))
 
-    modes = {c: cnt.most_common(1)[0][0] for c,cnt in categorical_counts.items() if cnt}
-    
+    modes = {c: cnt.most_common(1)[0][0] for c, cnt in categorical_counts.items() if cnt}
+
     stats = {
         "medians": medians,
         "modes": modes,
@@ -685,15 +725,24 @@ def compute_global_stats_reservoir_schema_aware(
         "original_sample_df": pd.DataFrame(original_samples) if original_samples else pd.DataFrame(),
         "original_row_count": row_id,
         "minhash_params": {"num_hashes": MINHASH_NUM, "bands": LSH_BANDS, "shingle_k": SHINGLE_K},
-        "sqlite_conn": conn
+        "sqlite_conn": conn,
     }
     conn.commit()
     logger.info("Schema-aware first pass done rows=%d, numeric_cols=%d", row_id, len(numeric_cols_final))
     return stats
 
-def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
-                                     keep_punctuation=True, drop_outliers=False, drop_outlier_columns=None,
-                                     near_dup_threshold=0.85, csv_stream_path=None):
+
+def clean_with_sqlite_dedupe_batched(
+    path,
+    output_dir,
+    stats,
+    chunksize=50000,
+    keep_punctuation=True,
+    drop_outliers=False,
+    drop_outlier_columns=None,
+    near_dup_threshold=0.85,
+    csv_stream_path=None,
+):
     """
     Batched / vectorized cleaning pass that:
       - computes all row hashes per chunk in vectorized form
@@ -709,9 +758,9 @@ def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
     medians = stats.get("medians", {})
     modes = stats.get("modes", {})
     numeric_cols = stats.get("numeric_cols", [])
-    text_cols = stats.get("text_cols", [])
+    # text_cols = stats.get("text_cols", [])  # Reserved for future use
     all_cols = stats.get("all_cols", [])
-    minhash_params = stats.get("minhash_params", {"num_hashes":64,"bands":16,"shingle_k":5})
+    minhash_params = stats.get("minhash_params", {"num_hashes": 64, "bands": 16, "shingle_k": 5})
     MINHASH_NUM = minhash_params["num_hashes"]
     LSH_BANDS = minhash_params["bands"]
     SHINGLE_K = minhash_params["shingle_k"]
@@ -720,7 +769,7 @@ def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
     if csv_stream_path is None:
         csv_stream_path = os.path.join(output_dir, "cleaned_data.csv")
     first_write = True
-    
+
     # If file exists already from previous run, remove it (safety)
     if os.path.exists(csv_stream_path):
         try:
@@ -733,19 +782,25 @@ def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
     reader = safe_read_v3(path, chunksize=chunksize)
 
     for chunk_idx, chunk in enumerate(reader):
-        logger.info(f"Processing chunk {chunk_idx+1} (batched DB ops) ...")
+        logger.info(f"Processing chunk {chunk_idx + 1} (batched DB ops) ...")
         if chunk.empty:
             continue
-            
+
         # Ensure chunk has all columns from the global schema
         for col in all_cols:
             if col not in chunk.columns:
                 chunk[col] = None
         # And ensure it's in the correct order
         chunk = chunk[all_cols]
-        
+
         df = chunk.copy()
-        chunk_report = {"near_duplicates_found": 0, "outliers": {}, "columns_fixed": {}, "text_normalized": {}, "imputed_counts": {}}
+        chunk_report = {
+            "near_duplicates_found": 0,
+            "outliers": {},
+            "columns_fixed": {},
+            "text_normalized": {},
+            "imputed_counts": {},
+        }
 
         # compute row hashes vectorized for chunk
         hashed_pairs = _chunk_row_hashes_vectorized(df)  # list of (hash, local_idx)
@@ -753,11 +808,11 @@ def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
 
         # batch SELECT to find which hashes already exist
         existing_hashes = set()
-        BATCH = 999 # Max variables in SQLite is 999
+        BATCH = 999  # Max variables in SQLite is 999
         if hashes:
             for i in range(0, len(hashes), BATCH):
-                batch = hashes[i:i+BATCH]
-                q = "SELECT hash FROM row_hashes WHERE hash IN ({seq})".format(seq=",".join("?"*len(batch)))
+                batch = hashes[i : i + BATCH]
+                q = "SELECT hash FROM row_hashes WHERE hash IN ({seq})".format(seq=",".join("?" * len(batch)))
                 cur.execute(q, batch)
                 rows = cur.fetchall()
                 existing_hashes.update([r[0] for r in rows])
@@ -765,15 +820,15 @@ def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
         # determine keep_mask booleans and prepare inserts for those not present
         to_insert = []
         keep_local_idxs = []
-        for (h, local_idx) in hashed_pairs:
+        for h, local_idx in hashed_pairs:
             if h in existing_hashes:
                 continue
             else:
                 keep_local_idxs.append(local_idx)
                 # We need to make sure we don't add the same hash twice in one batch
-                existing_hashes.add(h) 
+                existing_hashes.add(h)
                 to_insert.append((h, int(cleaned_row_count + len(keep_local_idxs) - 1)))
-        
+
         # Bulk insert new hashes (keep-first semantics)
         if to_insert:
             cur.executemany("INSERT OR IGNORE INTO row_hashes(hash, first_seen_row) VALUES (?, ?);", to_insert)
@@ -786,12 +841,12 @@ def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
             df_kept = pd.DataFrame(columns=df.columns)  # empty
 
         if df_kept.empty:
-            logger.info(f"Chunk {chunk_idx+1} was all duplicates.")
+            logger.info(f"Chunk {chunk_idx + 1} was all duplicates.")
             parts_reports.append(chunk_report)
             continue
 
         # --- Start cleaning on df_kept ---
-        
+
         # impute using medians/modes
         for col in df_kept.columns:
             if col.endswith("_was_imputed") or col.endswith("_is_outlier"):
@@ -799,7 +854,7 @@ def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
             na_mask = df_kept[col].isna()
             if na_mask.sum() == 0:
                 continue
-            
+
             fill = None
             if col in medians and col in numeric_cols:
                 fill = medians[col]
@@ -812,9 +867,9 @@ def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
                         fill = df_kept[col].median()
                     except Exception:
                         pass
-                elif df_kept[col].dtype == 'object':
+                elif df_kept[col].dtype == "object":
                     fill = df_kept[col].mode().iloc[0] if not df_kept[col].mode().empty else None
-            
+
             if fill is not None and pd.notna(fill):
                 df_kept[col + "_was_imputed"] = na_mask
                 df_kept[col] = df_kept[col].fillna(fill)
@@ -847,7 +902,7 @@ def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
         bucket_keys_needed = set()
         kept_snippets = []
         for idx, row in df_kept.iterrows():
-            snippet = " ".join([str(row.get(c,"")) for c in all_cols[:3]])
+            snippet = " ".join([str(row.get(c, "")) for c in all_cols[:3]])
             shingles = _shingles(snippet, k=SHINGLE_K)
             sig = compute_minhash_signature(shingles, num_hashes=MINHASH_NUM)
             buckets = lsh_buckets_from_signature(sig, bands=LSH_BANDS)
@@ -859,83 +914,89 @@ def clean_with_sqlite_dedupe_batched(path, output_dir, stats, chunksize=50000,
         if bucket_keys_needed:
             BK_list = list(bucket_keys_needed)
             for i in range(0, len(BK_list), BATCH):
-                sub = BK_list[i:i+BATCH]
-                q = "SELECT bucket_key, sampled_row_id, snippet FROM lsh_samples WHERE bucket_key IN ({})".format(",".join("?"*len(sub)))
+                sub = BK_list[i : i + BATCH]
+                q = "SELECT bucket_key, sampled_row_id, snippet FROM lsh_samples WHERE bucket_key IN ({})".format(
+                    ",".join("?" * len(sub))
+                )
                 cur.execute(q, tuple(sub))
                 for bk, rid, snip in cur.fetchall():
                     bucket_to_candidates[bk].append((rid, snip))
 
         # compute similarities in memory
         near_dup_pairs = []
-        for (local_idx, snippet, buckets) in kept_snippets:
+        for local_idx, snippet, buckets in kept_snippets:
             seen_cands = set()
             for b in buckets:
                 for cand_id, cand_snip in bucket_to_candidates.get(b, []):
                     if cand_id in seen_cands:
                         continue
                     seen_cands.add(cand_id)
-                    
+
                     try:
                         sim = SequenceMatcher(None, snippet, cand_snip).ratio()
                     except Exception:
                         sim = 0
-                        
+
                     if sim >= near_dup_threshold:
-                        near_dup_pairs.append({"row_index": int(local_idx), "candidate_id": int(cand_id), "similarity": float(sim)})
-                        
+                        near_dup_pairs.append(
+                            {"row_index": int(local_idx), "candidate_id": int(cand_id), "similarity": float(sim)}
+                        )
+
         chunk_report["near_duplicates_found"] = len(near_dup_pairs)
 
         # STREAM cleaned chunk to CSV
         mode = "w" if first_write else "a"
         header = first_write
         df_kept.to_csv(csv_stream_path, index=False, mode=mode, header=header)
-        
+
         first_write = False
         cleaned_row_count += len(df_kept)
         parts_reports.append(chunk_report)
 
     conn.commit()
     logger.info(f"Finished cleaning. Total rows kept: {cleaned_row_count}")
-    return cleaned_row_count, parts_reports # Return count and reports
+    return cleaned_row_count, parts_reports  # Return count and reports
+
 
 # ----------------------------------------------------------------------------
 # SECTION 7: CORE ALGORITHM - REPORTING
 # ----------------------------------------------------------------------------
 
+
 def generate_report_two_pass_fixed(
     original_sample_df,
     original_row_count,
     cleaned_row_count,
-    after_sample_df, # A small sample from the cleaned file
+    after_sample_df,  # A small sample from the cleaned file
     parts_reports,
-    stats
+    stats,
 ):
     """
     Generates the final JSON report by aggregating chunk reports.
     """
     logger.info("Generating final cleaning report...")
-    
+
     # Aggregate chunk-level reports
     total_near_dups = 0
     total_imputed = defaultdict(int)
     total_outliers = defaultdict(int)
-    
+
     for report in parts_reports:
         total_near_dups += report.get("near_duplicates_found", 0)
         for col, count in report.get("imputed_counts", {}).items():
             total_imputed[col] += count
         for col, count in report.get("outliers", {}).items():
             total_outliers[col] += count
-            
+
     # Calculate deduplication
     rows_dropped = original_row_count - cleaned_row_count
-    
+
     # Get schema samples
     try:
         original_schema = {col: str(dtype) for col, dtype in original_sample_df.dtypes.items()}
     except Exception:
         original_schema = {}
-        
+
     try:
         cleaned_schema = {col: str(dtype) for col, dtype in after_sample_df.dtypes.items()}
     except Exception:
@@ -963,15 +1024,17 @@ def generate_report_two_pass_fixed(
             "modes": stats.get("modes", {}),
         },
         "samples": {
-            "before_sample": original_sample_df.to_dict('records') if not original_sample_df.empty else [],
-            "after_sample": after_sample_df.to_dict('records') if not after_sample_df.empty else [],
-        }
+            "before_sample": original_sample_df.to_dict("records") if not original_sample_df.empty else [],
+            "after_sample": after_sample_df.to_dict("records") if not after_sample_df.empty else [],
+        },
     }
     return report_data
+
 
 # ----------------------------------------------------------------------------
 # SECTION 8: THE ORCHESTRATOR
 # ----------------------------------------------------------------------------
+
 
 def run_full_cleaning_pipeline_two_pass_sqlite_batched(
     path,
@@ -987,7 +1050,7 @@ def run_full_cleaning_pipeline_two_pass_sqlite_batched(
     keep_punctuation=True,
     drop_outliers=False,
     drop_outlier_columns=None,
-    near_dup_threshold=0.85
+    near_dup_threshold=0.85,
 ):
     """
     Orchestrator: removes existing sqlite_path (clean state), runs pass1 (batched),
@@ -1007,22 +1070,23 @@ def run_full_cleaning_pipeline_two_pass_sqlite_batched(
 
     # Pass 1: reservoir + LSH inserted in bulk per chunk
     stats = compute_global_stats_reservoir_schema_aware(
-        path, conn,
+        path,
+        conn,
         chunksize=chunksize,
         numeric_sample_mod=numeric_sample_mod,
         categorical_sample_mod=categorical_sample_mod,
         lsh_sample_mod=lsh_sample_mod,
         original_sample_mod=original_sample_mod,
         numeric_capacity=numeric_capacity,
-        max_original_sample_rows=max_original_sample_rows
+        max_original_sample_rows=max_original_sample_rows,
     )
-    
+
     if not stats:
         logger.error("First pass failed or file was empty. Aborting.")
         conn.close()
         return None, None
 
-    stats['sqlite_conn'] = conn
+    stats["sqlite_conn"] = conn
 
     original_sample_df = stats.get("original_sample_df", pd.DataFrame())
     original_row_count = stats.get("original_row_count", 0)
@@ -1030,12 +1094,15 @@ def run_full_cleaning_pipeline_two_pass_sqlite_batched(
     # Pass 2: batched cleaning and streaming to CSV
     cleaned_path = os.path.join(output_dir, "cleaned_data.csv")
     cleaned_row_count, parts_reports = clean_with_sqlite_dedupe_batched(
-        path, output_dir, stats, chunksize=chunksize,
+        path,
+        output_dir,
+        stats,
+        chunksize=chunksize,
         keep_punctuation=keep_punctuation,
         drop_outliers=drop_outliers,
         drop_outlier_columns=drop_outlier_columns,
         near_dup_threshold=near_dup_threshold,
-        csv_stream_path=cleaned_path
+        csv_stream_path=cleaned_path,
     )
 
     # Since we streamed cleaned output, load a small sample as 'after_sample'
@@ -1046,12 +1113,7 @@ def run_full_cleaning_pipeline_two_pass_sqlite_batched(
 
     # Build report
     report = generate_report_two_pass_fixed(
-        original_sample_df,
-        original_row_count,
-        cleaned_row_count,
-        after_sample_df,
-        parts_reports,
-        stats
+        original_sample_df, original_row_count, cleaned_row_count, after_sample_df, parts_reports, stats
     )
 
     # save the report JSON
@@ -1067,7 +1129,7 @@ def run_full_cleaning_pipeline_two_pass_sqlite_batched(
     # close DB connection
     try:
         conn.close()
-    except:
+    except Exception:
         pass
 
     return cleaned_path, report_path
@@ -1077,54 +1139,51 @@ def run_full_cleaning_pipeline_two_pass_sqlite_batched(
 # SECTION 9: INTERACTIVE RUNNER (UPLOAD, PATH, OR DEMO)
 # ----------------------------------------------------------------------------
 
+
 def run_pipeline_on_user_file(file_path, chunksize=100000):
     """Helper function to run the full pipeline on a specified file."""
     try:
         # Define output paths
         output_dir = f"{os.path.basename(file_path)}_output"
         db_path = f"{os.path.basename(file_path)}_cleaner.db"
-        
+
         logger.info(f"Starting pipeline for: {file_path}")
         logger.info(f"Output will be in: ./{output_dir}/")
         logger.info(f"Database will be at: ./{db_path}")
 
         # Run the full pipeline
         cleaned_path, report_path = run_full_cleaning_pipeline_two_pass_sqlite_batched(
-            path=file_path,
-            output_dir=output_dir,
-            sqlite_path=db_path,
-            chunksize=chunksize 
+            path=file_path, output_dir=output_dir, sqlite_path=db_path, chunksize=chunksize
         )
 
         # --- Print results ---
         if cleaned_path and report_path:
-            logger.info("="*30)
+            logger.info("=" * 30)
             logger.info(f"CLEANING RESULTS FOR: {file_path}")
-            logger.info("="*30)
-            with open(report_path, 'r') as f:
-                print(json.dumps(json.load(f)['summary'], indent=2))
-            
+            logger.info("=" * 30)
+            with open(report_path, "r") as f:
+                print(json.dumps(json.load(f)["summary"], indent=2))
+
             print(f"\n--- Cleaned Data (Head) saved to {cleaned_path} ---")
             print(pd.read_csv(cleaned_path, nrows=5).head())
-            
+
             print("\nTo download your cleaned file, run this in a new cell:")
             print(f"from google.colab import files\nfiles.download('{cleaned_path}')")
-            
+
             print("\nTo download your report, run this in a new cell:")
             print(f"from google.colab import files\nfiles.download('{report_path}')")
         else:
-             logger.error("Pipeline run failed for the specified file.")
+            logger.error("Pipeline run failed for the specified file.")
 
     except Exception as e:
         logger.error(f"An error occurred during the pipeline run: {e}")
-    
 
 
 def run_demo_examples():
     """Helper function to create and run the built-in demo files."""
-    logger.info("="*30)
+    logger.info("=" * 30)
     logger.info("OPTION 3: RUNNING BUILT-IN EXAMPLES")
-    logger.info("="*30)
+    logger.info("=" * 30)
 
     logger.info("Setting up example data files...")
 
@@ -1154,25 +1213,26 @@ def run_demo_examples():
 
     # --- 3. Create a messy Excel (xlsx) file ---
     try:
-        excel_df = pd.DataFrame([
-            {"item": "Pen", "stock": 100, "color": "Blue"},
-            {"item": "Pen", "stock": 100, "color": "Blue"}, # duplicate
-            {"item": "Pencil", "stock": 200, "color": "Yellow"},
-            {"item": "Eraser", "stock": None, "color": "Pink"} # missing
-        ])
+        excel_df = pd.DataFrame(
+            [
+                {"item": "Pen", "stock": 100, "color": "Blue"},
+                {"item": "Pen", "stock": 100, "color": "Blue"},  # duplicate
+                {"item": "Pencil", "stock": 200, "color": "Yellow"},
+                {"item": "Eraser", "stock": None, "color": "Pink"},  # missing
+            ]
+        )
         excel_df.to_excel("test_data.xlsx", sheet_name="Sheet1", index=False)
         _EXAMPLE_EXCEL_CREATED = True
     except Exception as e:
         _EXAMPLE_EXCEL_CREATED = False
         logger.error(f"Could not create Excel file (openpyxl writer might be missing): {e}")
 
-
     logger.info("--- 1. RUNNING PIPELINE ON CSV DATA ---")
     csv_cleaned_path, csv_report_path = run_full_cleaning_pipeline_two_pass_sqlite_batched(
         path="test_data.csv",
         output_dir="csv_output",
         sqlite_path="csv_cleaner.db",
-        chunksize=5 # Use tiny chunksize for testing
+        chunksize=5,  # Use tiny chunksize for testing
     )
 
     logger.info("--- 2. RUNNING PIPELINE ON JSONL DATA ---")
@@ -1180,7 +1240,7 @@ def run_demo_examples():
         path="test_data.jsonl",
         output_dir="jsonl_output",
         sqlite_path="jsonl_cleaner.db",
-        chunksize=2 # Use tiny chunksize for testing
+        chunksize=2,  # Use tiny chunksize for testing
     )
 
     if _HAS_OPENPYXL and _EXAMPLE_EXCEL_CREATED:
@@ -1189,48 +1249,49 @@ def run_demo_examples():
             path="test_data.xlsx",
             output_dir="excel_output",
             sqlite_path="excel_cleaner.db",
-            chunksize=2 # Use tiny chunksize for testing
+            chunksize=2,  # Use tiny chunksize for testing
         )
 
-
     # --- 4. Print results ---
-    logger.info("="*30)
+    logger.info("=" * 30)
     logger.info("CSV CLEANING RESULTS (EXAMPLE 2)")
-    logger.info("="*30)
+    logger.info("=" * 30)
     try:
-        with open(csv_report_path, 'r') as f:
-            print(json.dumps(json.load(f)['summary'], indent=2))
+        with open(csv_report_path, "r") as f:
+            print(json.dumps(json.load(f)["summary"], indent=2))
         print("\n--- Cleaned CSV Data (Head) ---")
         print(pd.read_csv(csv_cleaned_path).head())
     except Exception as e:
         logger.error(f"Failed to read CSV results: {e}")
 
-    logger.info("="*30)
+    logger.info("=" * 30)
     logger.info("JSONL CLEANING RESULTS (EXAMPLE 2)")
-    logger.info("="*30)
+    logger.info("=" * 30)
     try:
-        with open(jsonl_report_path, 'r') as f:
-            print(json.dumps(json.load(f)['summary'], indent=2))
+        with open(jsonl_report_path, "r") as f:
+            print(json.dumps(json.load(f)["summary"], indent=2))
         print("\n--- Cleaned JSONL Data (Head) ---")
         print(pd.read_csv(jsonl_cleaned_path).head())
     except Exception as e:
         logger.error(f"Failed to read JSONL results: {e}")
 
     if _HAS_OPENPYXL and _EXAMPLE_EXCEL_CREATED:
-        logger.info("="*30)
+        logger.info("=" * 30)
         logger.info("EXCEL CLEANING RESULTS (EXAMPLE 2)")
-        logger.info("="*30)
+        logger.info("=" * 30)
         try:
-            with open(excel_report_path, 'r') as f:
-                print(json.dumps(json.load(f)['summary'], indent=2))
+            with open(excel_report_path, "r") as f:
+                print(json.dumps(json.load(f)["summary"], indent=2))
             print("\n--- Cleaned Excel Data (Head) ---")
             print(pd.read_csv(excel_cleaned_path).head())
         except Exception as e:
             logger.error(f"Failed to read Excel results: {e}")
 
+
 # ---
 # MAIN: interactive CLI wrapper
 # ---
+
 
 def interactive_menu():
     """Simple interactive menu for running the pipeline.
@@ -1247,9 +1308,9 @@ def interactive_menu():
     try:
         choice = input("Enter 1, 2 or 3: ").strip()
     except Exception:
-        choice = '3'
+        choice = "3"
 
-    if choice == '1':
+    if choice == "1":
         if files is None:
             logger.error("Upload option not available in this environment. Please use option 2.")
             return
@@ -1265,7 +1326,7 @@ def interactive_menu():
         except Exception as e:
             logger.error(f"An error occurred during file upload or processing: {e}")
 
-    elif choice == '2':
+    elif choice == "2":
         try:
             input_filename = input("Please enter the full path to your file: ").strip()
             if os.path.exists(input_filename):
@@ -1276,10 +1337,10 @@ def interactive_menu():
         except Exception as e:
             logger.error(f"An error occurred: {e}")
 
-    elif choice == '3':
+    elif choice == "3":
         run_demo_examples()
 
-    elif choice == '4':
+    elif choice == "4":
         vehicles_path = os.path.join(os.getcwd(), "vehicles.csv")
         if os.path.exists(vehicles_path):
             logger.info(f"Found vehicles.csv at: {vehicles_path}. Running pipeline.")

@@ -7,19 +7,20 @@ Usage examples:
 
 Defaults: intensity=intense (more aggressive sampling / checks)
 """
-import os
 import argparse
 import logging
+import os
 import time
+
 from dotenv import load_dotenv
 
+from benchmarking import run_benchmark
 from data_cleaning import run_full_cleaning_pipeline_two_pass_sqlite_batched
 from pipeline_utils import (
     enhance_numeric_inference,
     fix_categorical_numeric_detection,
     llm_enrich_dataframe,
 )
-from benchmarking import run_benchmark
 
 logger = logging.getLogger(__name__)
 
@@ -54,23 +55,32 @@ def parse_args():
     p.add_argument("--input", "-i", required=True, help="Path to input file")
     p.add_argument("--output-dir", "-o", default="pipeline_output", help="Directory for outputs")
     p.add_argument("--sqlite", default="pipeline_state.db", help="SQLite state file")
-    p.add_argument("--intensity", choices=["light","medium","intense"], default="intense")
+    p.add_argument("--intensity", choices=["light", "medium", "intense"], default="intense")
     p.add_argument("--debug", action="store_true")
-    p.add_argument("--enhance-numeric", action="store_true", dest="enhance_numeric", help="Run enhanced numeric inference after pass1")
-    p.add_argument("--fix-catnum", action="store_true", dest="fix_catnum", help="Apply improved categorical-vs-numeric correction")
+    p.add_argument(
+        "--enhance-numeric",
+        action="store_true",
+        dest="enhance_numeric",
+        help="Run enhanced numeric inference after pass1",
+    )
+    p.add_argument(
+        "--fix-catnum", action="store_true", dest="fix_catnum", help="Apply improved categorical-vs-numeric correction"
+    )
     p.add_argument("--enable-llm", action="store_true", help="Enable LLM-powered enrichment (stub/local if no key)")
     p.add_argument("--llm-key", default=None, help="API key for chosen LLM provider (optional)")
-    p.add_argument("--provider", choices=["gemini","openai"], default="gemini", help="LLM provider to use for enrichment")
+    p.add_argument(
+        "--provider", choices=["gemini", "openai"], default="gemini", help="LLM provider to use for enrichment"
+    )
     p.add_argument("--benchmark", action="store_true", help="Run benchmarking harness after pipeline")
     return p.parse_args()
 
 
 def main():
     # Load environment variables from env/.env
-    env_path = os.path.join(os.path.dirname(__file__), 'env', '.env')
+    env_path = os.path.join(os.path.dirname(__file__), "env", ".env")
     if os.path.exists(env_path):
         load_dotenv(env_path)
-    
+
     args = parse_args()
 
     log_level = logging.DEBUG if args.debug else logging.INFO

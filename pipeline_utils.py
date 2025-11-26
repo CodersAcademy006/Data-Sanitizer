@@ -4,11 +4,13 @@ pipeline_utils.py
 Utility helpers for the pipeline: normalization-accuracy checks, enhanced numeric inference,
 categorical-vs-numeric fixes, and an LLM enrichment stub (local fallback if no API key).
 """
-import os
+
 import json
 import logging
-from difflib import SequenceMatcher
+import os
 import re
+from difflib import SequenceMatcher
+
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -89,14 +91,14 @@ def infer_numeric_column_enhanced(series, threshold=0.7):
         total += 1
         s = str(v).strip()
         # handle percent
-        if s.endswith('%'):
+        if s.endswith("%"):
             s = s[:-1]
         # handle parentheses negative numbers
-        s = s.replace('(', '-').replace(')', '')
+        s = s.replace("(", "-").replace(")", "")
         # remove currency symbols and commas
         s2 = re.sub(r"[^0-9eE+\-\.\,]", "", s)
-        s2 = s2.replace(',', '')
-        if s2 == '':
+        s2 = s2.replace(",", "")
+        if s2 == "":
             continue
         try:
             float(s2)
@@ -118,10 +120,10 @@ def enhance_numeric_inference(report_path_or_obj, input_path=None):
     """
     # Load report
     if isinstance(report_path_or_obj, str) and os.path.exists(report_path_or_obj):
-        with open(report_path_or_obj, 'r', encoding='utf-8') as f:
-            report = json.load(f)
+        with open(report_path_or_obj, "r", encoding="utf-8") as f:
+            json.load(f)
     elif isinstance(report_path_or_obj, dict):
-        report = report_path_or_obj
+        pass
     else:
         raise ValueError("report_path_or_obj must be a path or dict")
 
@@ -151,8 +153,8 @@ def enhance_numeric_inference(report_path_or_obj, input_path=None):
 
     out_path = None
     if isinstance(report_path_or_obj, str):
-        out_path = report_path_or_obj.replace('.json', '.numeric_diagnostics.json')
-        with open(out_path, 'w', encoding='utf-8') as f:
+        out_path = report_path_or_obj.replace(".json", ".numeric_diagnostics.json")
+        with open(out_path, "w", encoding="utf-8") as f:
             json.dump(diagnostics, f, indent=2)
     else:
         out_path = None
@@ -196,7 +198,7 @@ def fix_categorical_numeric_detection(report_path_or_obj, input_path=None, uniqu
 
     out = {
         "suggestions": suggestions,
-        "note": "Use these suggestions to override auto-detection in pipeline or as diagnostics."
+        "note": "Use these suggestions to override auto-detection in pipeline or as diagnostics.",
     }
 
     logger.info("Categorical-vs-numeric suggestion count=%d", len(suggestions))
@@ -226,12 +228,13 @@ def llm_enrich_dataframe(cleaned_csv_path_or_df, provider="gemini", api_key=None
     if provider == "gemini":
         try:
             import google.generativeai as genai  # type: ignore
+
             if api_key:
                 genai.configure(api_key=api_key)
                 logger.info("Gemini provider configured. Attempting live enrichment on sample rows...")
                 model = genai.GenerativeModel("gemini-pro")
                 enriched = df.copy()
-                
+
                 # Enrich first 10 rows with Gemini (to avoid excessive API calls)
                 sample_size = min(10, len(df))
                 for idx in range(sample_size):
@@ -244,7 +247,7 @@ def llm_enrich_dataframe(cleaned_csv_path_or_df, provider="gemini", api_key=None
                             enriched.at[idx, "__gemini_analysis"] = response.text.strip()
                     except Exception as e:
                         logger.debug("Gemini API call failed for row %d: %s", idx, e)
-                
+
                 logger.info("Gemini enrichment complete")
                 llm_enriched = True
             else:
@@ -257,6 +260,7 @@ def llm_enrich_dataframe(cleaned_csv_path_or_df, provider="gemini", api_key=None
     elif provider == "openai":
         try:
             import openai  # type: ignore
+
             if api_key:
                 openai.api_key = api_key
                 logger.info("OpenAI provider configured (live calls not yet implemented).")
@@ -267,7 +271,7 @@ def llm_enrich_dataframe(cleaned_csv_path_or_df, provider="gemini", api_key=None
     # Local heuristic enrichment (safe, deterministic)
     if not llm_enriched:
         enriched = df.copy()
-    
+
     for c in df.columns:
         if pd.api.types.is_object_dtype(df[c]):
             enriched[c + "__token_count"] = df[c].fillna("").astype(str).apply(lambda s: len(s.split()))
