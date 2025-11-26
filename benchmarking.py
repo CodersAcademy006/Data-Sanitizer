@@ -9,13 +9,16 @@ Cleanlab, and OpenRefine (these external runs are out-of-scope for this local
 script and should be run in their respective environments; this script
 provides a common schema for result JSON so you can compare after the fact).
 """
-import os
-import time
+
 import json
 import logging
+import os
+import time
+
+import pandas as pd
+
 from data_cleaning import run_full_cleaning_pipeline_two_pass_sqlite_batched
 from pipeline_utils import compute_normalization_accuracy
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +27,7 @@ def run_benchmark(input_path, output_dir="benchmark_output", sqlite_path="benchm
     os.makedirs(output_dir, exist_ok=True)
     t0 = time.perf_counter()
     cleaned_path, report_path = run_full_cleaning_pipeline_two_pass_sqlite_batched(
-        path=input_path,
-        output_dir=output_dir,
-        sqlite_path=sqlite_path,
-        chunksize=50000
+        path=input_path, output_dir=output_dir, sqlite_path=sqlite_path, chunksize=50000
     )
     t1 = time.perf_counter()
 
@@ -42,7 +42,7 @@ def run_benchmark(input_path, output_dir="benchmark_output", sqlite_path="benchm
     report = {}
     if report_path and os.path.exists(report_path):
         try:
-            with open(report_path, 'r', encoding='utf-8') as f:
+            with open(report_path, "r", encoding="utf-8") as f:
                 report = json.load(f)
         except Exception:
             report = {}
@@ -64,11 +64,11 @@ def run_benchmark(input_path, output_dir="benchmark_output", sqlite_path="benchm
         "databricks": "Run a similar cleaning workflow in Databricks and export a JSON summary with keys: runtime_seconds, cleaned_rows, rows_dropped_total, imputed_counts",
         "cleanlab": "Run Cleanlab workflows for label cleaning as needed and export precision/recall metrics",
         "openrefine": "Use OpenRefine to profile and clean the dataset; export a summary JSON with counts of edits per column",
-        "note": "This harness cannot run those external services. Produce JSON outputs from those tools and place them in the output_dir for side-by-side comparison."
+        "note": "This harness cannot run those external services. Produce JSON outputs from those tools and place them in the output_dir for side-by-side comparison.",
     }
 
     out_path = os.path.join(output_dir, "benchmark_report.json")
-    with open(out_path, 'w', encoding='utf-8') as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         json.dump(bench, f, indent=2, default=str)
 
     logger.info("Benchmark complete. Report saved to %s", out_path)

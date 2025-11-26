@@ -4,8 +4,8 @@ numpy>=1.23.0
 polars>=0.18.0  # Faster alternative to pandas for large files
 
 # File format support
-openpyxl>=3.8.0  # Excel
-ijson>=3.2.0  # Streaming JSON
+openpyxl>=3.0.0,<3.2.0  # Excel (3.1.x is the latest stable version)
+ijson>=3.1.0  # Streaming JSON
 pyarrow>=10.0.0  # Parquet + efficient operations
 
 # Cloud storage
